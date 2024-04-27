@@ -12,7 +12,7 @@ import torch.backends.cudnn
 
 from models import UNet11, LinkNet34, UNet, UNet16, AlbuNet
 from loss import LossBinary, LossMulti
-from dataset import RoboticsDataset
+from dataset import RoboticsDataset, HistologyDataset
 import utils
 import sys
 from prepare_train_val import get_split
@@ -69,12 +69,7 @@ def main():
               'are not.'.format(val_crop_height=args.val_crop_height, val_crop_width=args.val_crop_width))
         sys.exit(0)
 
-    if args.type == 'parts':
-        num_classes = 4
-    elif args.type == 'instruments':
-        num_classes = 8
-    else:
-        num_classes = 1
+    num_classes = 1
 
     if args.model == 'UNet':
         model = UNet(num_classes=num_classes)
@@ -82,34 +77,38 @@ def main():
         model_name = moddel_list[args.model]
         model = model_name(num_classes=num_classes, pretrained=True)
 
+    # if torch.cuda.is_available():
+    #     if args.device_ids:
+    #         device_ids = list(map(int, args.device_ids.split(',')))
+    #     else:
+    #         device_ids = None
+    #     model = nn.DataParallel(model, device_ids=device_ids).cuda()
+    # else:
+    #     raise SystemError('GPU device not found')
+
     if torch.cuda.is_available():
-        if args.device_ids:
-            device_ids = list(map(int, args.device_ids.split(',')))
-        else:
-            device_ids = None
-        model = nn.DataParallel(model, device_ids=device_ids).cuda()
+        device = torch.device("cuda")
     else:
-        raise SystemError('GPU device not found')
+        device = torch.device("cpu")
 
-    if args.type == 'binary':
-        loss = LossBinary(jaccard_weight=args.jaccard_weight)
-    else:
-        loss = LossMulti(num_classes=num_classes, jaccard_weight=args.jaccard_weight)
+    model.to(device)
 
+    loss = LossBinary(jaccard_weight=args.jaccard_weight)
     cudnn.benchmark = True
 
     def make_loader(file_names, shuffle=False, transform=None, problem_type='binary', batch_size=1):
         return DataLoader(
-            dataset=RoboticsDataset(file_names, transform=transform, problem_type=problem_type),
+            dataset=HistologyDataset(file_names, transform=transform, problem_type=problem_type),
             shuffle=shuffle,
             num_workers=args.workers,
             batch_size=batch_size,
             pin_memory=torch.cuda.is_available()
         )
 
-    train_file_names, val_file_names = get_split(args.fold)
+    train_file_names = '/home/arnav/Disk/HistologyNet/robot-surgery-segmentation/data/zenodo/train'
+    val_file_names = '/home/arnav/Disk/HistologyNet/robot-surgery-segmentation/data/zenodo/val'
 
-    print('num train = {}, num_val = {}'.format(len(train_file_names), len(val_file_names)))
+    # print('num train = {}, num_val = {}'.format(len(train_file_names), len(val_file_names)))
 
     def train_transform(p=1):
         return Compose([
@@ -130,7 +129,7 @@ def main():
     train_loader = make_loader(train_file_names, shuffle=True, transform=train_transform(p=1), problem_type=args.type,
                                batch_size=args.batch_size)
     valid_loader = make_loader(val_file_names, transform=val_transform(p=1), problem_type=args.type,
-                               batch_size=len(device_ids))
+                               batch_size=10)
 
     root.joinpath('params.json').write_text(
         json.dumps(vars(args), indent=True, sort_keys=True))
@@ -151,7 +150,6 @@ def main():
         fold=args.fold,
         num_classes=num_classes
     )
-
 
 if __name__ == '__main__':
     main()

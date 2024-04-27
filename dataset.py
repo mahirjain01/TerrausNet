@@ -3,7 +3,16 @@ import numpy as np
 import cv2
 from torch.utils.data import Dataset
 import prepare_data
-from albumentations.torch.functional import img_to_tensor
+from albumentations.pytorch.transforms import ToTensorV2
+
+import glob
+import os
+
+import scipy.io
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision.transforms import ToTensor
+from torchvision.transforms.transforms import Grayscale, RandomCrop
 
 
 class RoboticsDataset(Dataset):
@@ -28,11 +37,46 @@ class RoboticsDataset(Dataset):
 
         if self.mode == 'train':
             if self.problem_type == 'binary':
-                return img_to_tensor(image), torch.from_numpy(np.expand_dims(mask, 0)).float()
+                return ToTensor()(image), torch.from_numpy(np.expand_dims(mask, 0)).float()
             else:
-                return img_to_tensor(image), torch.from_numpy(mask).long()
+                return ToTensor()(image), torch.from_numpy(mask).long()
         else:
-            return img_to_tensor(image), str(img_file_name)
+            return ToTensor()(image), str(img_file_name)
+
+
+class HistologyDataset(Dataset):
+    def __init__(self, root_dir, transform=None, mode='train', problem_type=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.mode = mode
+        self.problem_type = problem_type
+        self.image_dir = os.path.join(root_dir, 'images')
+        self.mask_dir = os.path.join(root_dir, 'masks')
+        self.file_names = os.listdir(self.image_dir)
+
+    def __len__(self):
+        return len(self.file_names)
+
+    def __getitem__(self, idx):
+        img_name = self.file_names[idx]
+        img_path = os.path.join(self.image_dir, img_name)
+        mask_path = os.path.join(self.mask_dir, img_name)
+        
+        image = load_image(img_path)
+        mask = load_mask(mask_path, self.problem_type)
+
+        data = {"image": image, "mask": mask}
+        # print("The data is : ", data)
+        augmented = self.transform(**data)
+        image, mask = augmented["image"], augmented["mask"]
+
+        if self.mode == 'train':
+            if self.problem_type == 'binary':
+                return ToTensor()(image), torch.from_numpy(np.expand_dims(mask, 0)).float()
+            else:
+                return ToTensor()(image), torch.from_numpy(mask).long()
+        else:
+            return ToTensor()(image), str(img_name)
 
 
 def load_image(path):
@@ -41,16 +85,9 @@ def load_image(path):
 
 
 def load_mask(path, problem_type):
-    if problem_type == 'binary':
-        mask_folder = 'binary_masks'
-        factor = prepare_data.binary_factor
-    elif problem_type == 'parts':
-        mask_folder = 'parts_masks'
-        factor = prepare_data.parts_factor
-    elif problem_type == 'instruments':
-        factor = prepare_data.instrument_factor
-        mask_folder = 'instruments_masks'
+    mask = cv2.imread(str(path))
+    return mask.astype(np.uint8)
 
-    mask = cv2.imread(str(path).replace('images', mask_folder).replace('jpg', 'png'), 0)
 
-    return (mask / factor).astype(np.uint8)
+# histology = HistologyDataset('/home/arnav/Disk/HistologyNet/robot-surgery-segmentation/data/HistologyNet/labelled')
+# print(histology[0])
